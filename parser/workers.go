@@ -1,9 +1,11 @@
 package parser
 
 import (
+	"encoding/json"
 	"fmt"
 	"github.com/PuerkitoBio/goquery"
 	"io"
+	"io/ioutil"
 	"net/http"
 	"net/url"
 	"regexp"
@@ -37,23 +39,29 @@ type report struct {
 	ChildPages      []string
 }
 
+var iteratee = 0
+
 func Parser(urlsData []map[string]string, checkId int, references map[string][]string, minWords int, minImgs int) (mainPageResult []*report) {
+	iteratee = 0
 	// получаем набор урлов на проверку
 	var urlSlice []string
 	for _, value := range urlsData {
 		urlSlice = append(urlSlice, value["WebSite"])
 	}
 
+	// получаем список заблокированных сайтов
+	var blockedUrlsMap = getBlockedUrlsMap()
+
 	// результат анализа главной страницы
-	mainPageResult = startWorkers(urlSlice, references, 50)
+	mainPageResult = startWorkers(urlSlice, references, blockedUrlsMap, true, 50)
 	// парсим дочерние страницы
 	for i, mainPageData := range mainPageResult {
-		childPageResult := startWorkers(mainPageData.ChildPages, references, 50)
+		childPageResult := startWorkers(mainPageData.ChildPages, references, blockedUrlsMap, false, 50)
 		for _, childPageData := range childPageResult {
 			// проверяем данные
-			if childPageData.UrlParsed == 0 {
+			/*if childPageData.UrlParsed == 0 {
 				mainPageData.UrlParsed = 0
-			}
+			}*/
 			if childPageData.UrlAvailable == 0 {
 				mainPageData.UrlAvailable = 0
 			}
@@ -113,13 +121,14 @@ func Parser(urlsData []map[string]string, checkId int, references map[string][]s
 		mainPageData.StopPhrases = uniquelyzer(mainPageData.StopPhrases)
 
 		// считаем процент выполнения
-		fmt.Println((i + 1) * 100 / len(urlSlice))
+		iteratee += 1
+		fmt.Println("дочерние", iteratee*50/len(urlSlice))
 	}
 
 	return mainPageResult
 }
 
-func startWorkers(urlsList []string, references map[string][]string, maxWorkers int) (result []*report) {
+func startWorkers(urlsList []string, references map[string][]string, blockedUrls map[string]bool, mainPage bool, maxWorkers int) (result []*report) {
 	var numJobs = len(urlsList)
 	jobs := make(chan string, numJobs)
 	pageAnalyzis := make(chan *report, numJobs)
@@ -129,7 +138,7 @@ func startWorkers(urlsList []string, references map[string][]string, maxWorkers 
 		workersQuantity = maxWorkers
 	}
 	for w := 0; w < workersQuantity; w++ {
-		go workerLogic(w+1, references, jobs, pageAnalyzis)
+		go workerLogic(w+1, references, blockedUrls, jobs, pageAnalyzis)
 	}
 
 	for i := 0; i < len(urlsList); i++ {
@@ -138,14 +147,17 @@ func startWorkers(urlsList []string, references map[string][]string, maxWorkers 
 	close(jobs)
 
 	for j := 0; j < numJobs; j++ {
-		//fmt.Println(j, numJobs)
+		if mainPage == true {
+			iteratee += 1
+			fmt.Println("главная", iteratee*50/numJobs)
+		}
 		result = append(result, <-pageAnalyzis)
 	}
 
 	return result
 }
 
-func workerLogic(id int, references map[string][]string, jobs <-chan string, results chan<- *report) {
+func workerLogic(id int, references map[string][]string, blockedUrls map[string]bool, jobs <-chan string, results chan<- *report) {
 	var index = 0
 	for urlData := range jobs {
 		// бланк ответа
@@ -170,18 +182,24 @@ func workerLogic(id int, references map[string][]string, jobs <-chan string, res
 			}
 		}
 
-		// TODO проверяем, что url отсутствует в представлении ViewBlockedDomain
-		/*
+		// проверяем, что url отсутствует в представлении ViewBlockedDomain
+		urlHost, _ := url.Parse(urlData)
+		if _, found := blockedUrls[urlHost.Host]; found == true {
 			reportData.UrlBlockedByRkn = 1
+			reportData.Comments = append(reportData.Comments, "Блокировка по закону")
 			results <- reportData
 			return
-		*/
+		}
 
 		// делаем запрос
 		client := &http.Client{
 			Timeout: 5 * time.Second,
 		}
-		resp, err := client.Get(urlData)
+		req, err := http.NewRequest("GET", urlData, nil)
+		if err == nil {
+			req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/74.0.3729.169 Safari/537.36")
+		}
+		resp, err := client.Do(req)
 		if err != nil {
 			// обрабатываем ошибки
 			if strings.Contains(err.Error(), "certificate") {
@@ -209,12 +227,14 @@ func workerLogic(id int, references map[string][]string, jobs <-chan string, res
 			finalURL = resp.Request.URL.String()
 			reportData.UrlRedirected = 1
 			reportData.Comments = append(reportData.Comments, strconv.Itoa(statusCode)+" "+finalURL)
-			// TODO проверяем, что url отсутствует в представлении ViewBlockedDomain
-			/*
-					reportData.UrlBlockedByRkn = 1
-					results <- urlData
-				    return
-			*/
+			// проверяем, что url отсутствует в представлении ViewBlockedDomain
+			urlHost, _ := url.Parse(finalURL)
+			if _, found := blockedUrls[urlHost.Host]; found == true {
+				reportData.UrlBlockedByRkn = 1
+				reportData.Comments = append(reportData.Comments, "Блокировка по закону")
+				results <- reportData
+				return
+			}
 		} else if statusCode >= 400 {
 			reportData.UrlAvailable = 0
 			reportData.UrlParsed = 0
@@ -291,8 +311,11 @@ func getSiteAnalysis(body io.Reader, finalURL string, references map[string][]st
 			if exists && len(href) > 1 {
 				if href[0:2] == "//" {
 					// разбираем урлы с //
-					href = mainUrlData.Scheme + ":" + href
-					result = append(result, href)
+					childUrlData, err := url.Parse(href)
+					if err == nil && mainUrlData.Host == childUrlData.Host {
+						href = mainUrlData.Scheme + ":" + href
+						result = append(result, href)
+					}
 				} else if href[0:1] == "/" {
 					// разбираем урлы, которые начинаются с /
 					href = mainUrlData.Scheme + "://" + mainUrlData.Host + href
@@ -368,4 +391,26 @@ func uniquelyzer(strSlice []string) []string {
 		}
 	}
 	return list
+}
+
+/**
+Получаем список заблокированных сайтов
+*/
+func getBlockedUrlsMap() map[string]bool {
+	var result = make(map[string]bool)
+	file, err := ioutil.ReadFile("listOfBlockedDomains.txt")
+	if err != nil {
+		return result
+	}
+
+	var blockedUrls []string
+	err = json.Unmarshal(file, &blockedUrls)
+	if err != nil {
+		return result
+	}
+
+	for _, urlStr := range blockedUrls {
+		result[urlStr] = true
+	}
+	return result
 }
