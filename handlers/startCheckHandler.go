@@ -8,12 +8,13 @@ import (
 )
 
 type ReqBody struct {
-	Urls       []map[string]string `json:"urls"`
-	CheckId    int                 `json:"checkId"`
-	References map[string][]string `json:"references"`
-	MinWords   int                 `json:"minWords"`
-	MinImgs    int                 `json:"minImgs"`
-	//ServiceTurnover map[string]int`json:"serviceTurnover"`
+	Urls            []map[string]string `json:"urls"`
+	CheckId         int                 `json:"checkId"`
+	References      map[string][]string `json:"references"`
+	MinWords        int                 `json:"minWords"`
+	MinImgs         int                 `json:"minImgs"`
+	ServiceTurnover map[string]float32  `json:"serviceTurnover"`
+	DuplicUrls      map[string]string   `json:"duplicateUrls"`
 }
 
 func StartCheckHandler(resp http.ResponseWriter, req *http.Request) {
@@ -31,21 +32,13 @@ func StartCheckHandler(resp http.ResponseWriter, req *http.Request) {
 	}
 
 	// парсим сайты
-	_result := parser.Parser(reqBody.Urls, reqBody.CheckId, reqBody.References, reqBody.MinWords, reqBody.MinImgs)
+	_result := parser.Parser(reqBody.Urls, reqBody.CheckId, reqBody.References, reqBody.MinWords, reqBody.MinImgs, reqBody.DuplicUrls, reqBody.ServiceTurnover)
 	// переводим ответ в json
 	result, err := json.Marshal(_result)
 	if err != nil {
 		http.Error(resp, err.Error(), http.StatusBadRequest)
 		return
 	}
-
-	/**
-	TODO
-	1. Добавить redis и проверку на одинаковые урлы
-	2. Добавить serviceTurnover
-	3. Добавить обработку процента через redis
-	4. Останавливать проверку
-	*/
 
 	resp.Write(result)
 }

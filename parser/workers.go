@@ -39,10 +39,24 @@ type report struct {
 	ChildPages      []string
 }
 
-var iteratee = 0
+const nodeCheckStatus = "http://localhost:9090/api/check-status/"
+const nodeCheckStatusPages = "http://localhost:9090/api/check-status-pages/"
 
-func Parser(urlsData []map[string]string, checkId int, references map[string][]string, minWords int, minImgs int) (mainPageResult []*report) {
+const childPagesQuantity = 50
+
+var iteratee = 0
+var samePercent = 0
+
+func Parser(
+	urlsData []map[string]string,
+	checkId int,
+	references map[string][]string,
+	minWords int, minImgs int,
+	duplicUrls map[string]string,
+	serviceTurnover map[string]float32,
+) (mainPageResult []*report) {
 	iteratee = 0
+	samePercent = 0
 	// получаем набор урлов на проверку
 	var urlSlice []string
 	for _, value := range urlsData {
@@ -52,38 +66,78 @@ func Parser(urlsData []map[string]string, checkId int, references map[string][]s
 	// получаем список заблокированных сайтов
 	var blockedUrlsMap = getBlockedUrlsMap()
 
+	// оповещение ноды о проверке страницы
+	var nodeUrlPages = nodeCheckStatusPages + strconv.Itoa(checkId) + "?message=" + url.QueryEscape("Идет проверка главных страниц сайтов")
+	_, _ = http.Get(nodeUrlPages)
+
 	// результат анализа главной страницы
-	mainPageResult = startWorkers(urlSlice, references, blockedUrlsMap, true, 50)
+	mainPageResult = startWorkers(urlSlice, references, blockedUrlsMap, true, checkId, 50)
 	// парсим дочерние страницы
 	for i, mainPageData := range mainPageResult {
-		childPageResult := startWorkers(mainPageData.ChildPages, references, blockedUrlsMap, false, 50)
-		for _, childPageData := range childPageResult {
-			// проверяем данные
-			/*if childPageData.UrlParsed == 0 {
-				mainPageData.UrlParsed = 0
-			}*/
-			if childPageData.UrlAvailable == 0 {
-				mainPageData.UrlAvailable = 0
-			}
-			if childPageData.UrlRedirected == 1 {
-				mainPageData.UrlRedirected = 1
-			}
-			if childPageData.UrlBlockedByRkn == 1 {
-				mainPageData.UrlBlockedByRkn = 1
-			}
-			// объединяем результаты анализа всех страниц
-			mainPageData.WordsCount += childPageData.WordsCount
-			mainPageData.ImagesCount += childPageData.ImagesCount
-			mainPageData.Comments = append(mainPageData.Comments, childPageData.Comments...)
-			mainPageData.Contacts = append(mainPageData.Contacts, childPageData.Contacts...)
-			mainPageData.Descriptions = append(mainPageData.Descriptions, childPageData.Descriptions...)
-			mainPageData.RegDocs = append(mainPageData.RegDocs, childPageData.RegDocs...)
-			mainPageData.PayButtons = append(mainPageData.PayButtons, childPageData.PayButtons...)
-			mainPageData.PayRules = append(mainPageData.PayRules, childPageData.PayRules...)
-			mainPageData.Offers = append(mainPageData.Offers, childPageData.Offers...)
-			mainPageData.PayLimits = append(mainPageData.PayLimits, childPageData.PayLimits...)
-			mainPageData.StopPhrases = append(mainPageData.StopPhrases, childPageData.StopPhrases...)
+		var needToCache = false
+		// останавливаем воркеры
+		if RedisGetBool("stop") == true {
+			fmt.Println(1111)
+			break
 		}
+
+		// проверяем является ли сайт дубликатом
+		_, exists := duplicUrls[mainPageData.Url]
+		if exists {
+			siteData := RedisGet(mainPageData.Url)
+			// Если в кэше есть данные
+			if len(siteData.Url) > 0 {
+				fmt.Println("cache is gotten")
+				*mainPageData = *siteData
+			} else {
+				needToCache = true
+			}
+		}
+
+		// оповещение ноды о проверке страницы
+		var nodeUrlPages = nodeCheckStatusPages + strconv.Itoa(checkId) + "?message=" + url.QueryEscape("Идет проверка дочерних страниц сайта "+mainPageData.Url)
+		_, _ = http.Get(nodeUrlPages)
+
+		if exists == false || exists && needToCache {
+			// сокращаем количество дочерних страниц до 50
+			if len(mainPageData.ChildPages) > childPagesQuantity {
+				mainPageData.ChildPages = mainPageData.ChildPages[0:childPagesQuantity]
+			}
+			childPageResult := startWorkers(mainPageData.ChildPages, references, blockedUrlsMap, false, checkId, 50)
+			for _, childPageData := range childPageResult {
+				// проверяем данные
+				//if childPageData.UrlParsed == 0 {
+				//	mainPageData.UrlParsed = 0
+				//}
+				if childPageData.UrlAvailable == 0 {
+					mainPageData.UrlAvailable = 0
+				}
+				if childPageData.UrlRedirected == 1 {
+					mainPageData.UrlRedirected = 1
+				}
+				if childPageData.UrlBlockedByRkn == 1 {
+					mainPageData.UrlBlockedByRkn = 1
+				}
+				// объединяем результаты анализа всех страниц
+				mainPageData.WordsCount += childPageData.WordsCount
+				mainPageData.ImagesCount += childPageData.ImagesCount
+				mainPageData.Comments = append(mainPageData.Comments, childPageData.Comments...)
+				mainPageData.Contacts = append(mainPageData.Contacts, childPageData.Contacts...)
+				mainPageData.Descriptions = append(mainPageData.Descriptions, childPageData.Descriptions...)
+				mainPageData.RegDocs = append(mainPageData.RegDocs, childPageData.RegDocs...)
+				mainPageData.PayButtons = append(mainPageData.PayButtons, childPageData.PayButtons...)
+				mainPageData.PayRules = append(mainPageData.PayRules, childPageData.PayRules...)
+				mainPageData.Offers = append(mainPageData.Offers, childPageData.Offers...)
+				mainPageData.PayLimits = append(mainPageData.PayLimits, childPageData.PayLimits...)
+				mainPageData.StopPhrases = append(mainPageData.StopPhrases, childPageData.StopPhrases...)
+			}
+			// записываем результаты в кэш
+			if needToCache {
+				fmt.Println("cache saved")
+				RedisSet(mainPageData.Url, mainPageData)
+			}
+		}
+
 		// добавляем необходимые поля
 		mainPageData.Id = i + 1
 		mainPageData.CheckId = checkId
@@ -102,9 +156,11 @@ func Parser(urlsData []map[string]string, checkId int, references map[string][]s
 			mainPageData.Comments = append(mainPageData.Comments, "мало картинок: "+strconv.Itoa(mainPageData.ImagesCount))
 		}
 
-		// TODO ServiceTurnover
+		// Считаем оборот за неделю
 		if serviceId != 0 {
-
+			if value, exist := serviceTurnover[strconv.Itoa(serviceId)]; exist {
+				mainPageData.ServiceTurnover = value
+			}
 		}
 
 		// убираем ненужное поле
@@ -122,13 +178,21 @@ func Parser(urlsData []map[string]string, checkId int, references map[string][]s
 
 		// считаем процент выполнения
 		iteratee += 1
+		// оповещаем node о ходе проверки
+		var percent = iteratee * 50 / len(urlSlice)
+		if percent%2 == 0 && percent != samePercent {
+			samePercent = percent
+			var nodeUrl = nodeCheckStatus + strconv.Itoa(checkId) + "?percent=" + strconv.Itoa(percent)
+			_, _ = http.Get(nodeUrl)
+		}
+
 		fmt.Println("дочерние", iteratee*50/len(urlSlice))
 	}
 
 	return mainPageResult
 }
 
-func startWorkers(urlsList []string, references map[string][]string, blockedUrls map[string]bool, mainPage bool, maxWorkers int) (result []*report) {
+func startWorkers(urlsList []string, references map[string][]string, blockedUrls map[string]bool, mainPage bool, checkId int, maxWorkers int) (result []*report) {
 	var numJobs = len(urlsList)
 	jobs := make(chan string, numJobs)
 	pageAnalyzis := make(chan *report, numJobs)
@@ -149,6 +213,21 @@ func startWorkers(urlsList []string, references map[string][]string, blockedUrls
 	for j := 0; j < numJobs; j++ {
 		if mainPage == true {
 			iteratee += 1
+			var percent = iteratee * 50 / numJobs
+			// оповещаем node о ходе проверки
+			if percent%2 == 0 && percent != samePercent {
+				samePercent = percent
+				var nodeUrl = nodeCheckStatus + strconv.Itoa(checkId) + "?percent=" + strconv.Itoa(iteratee*50/numJobs)
+				_, _ = http.Get(nodeUrl)
+			}
+
+			// TODO останавливаем воркеры
+			if RedisGetBool("stop") == true {
+				fmt.Println(2222)
+				// TODO удаляем кэш
+				return result
+			}
+
 			fmt.Println("главная", iteratee*50/numJobs)
 		}
 		result = append(result, <-pageAnalyzis)
@@ -165,101 +244,103 @@ func workerLogic(id int, references map[string][]string, blockedUrls map[string]
 		reportData.Id = index + 1
 		reportData.Url = urlData
 		// проводим валидацию урла
+		urlHost, errHost := url.Parse(urlData)
 		var re = regexp.MustCompile(`^(https?:\/\/)?[-а-яё\w\d:.]*(\.)[-а-яё\w\d]{2,}.*`)
-		if re.Match([]byte(urlData)) == false {
+		if re.Match([]byte(urlData)) == false || errHost != nil {
 			reportData.Comments = append(reportData.Comments, urlData+" - невалидный url")
 			results <- reportData
-			return
-		}
-
-		// проверяем протокол
-		if strings.HasPrefix(urlData, "http") == false {
-			resp, err := http.Head("https://" + urlData)
-			if err != nil || resp.StatusCode >= 400 {
-				urlData = "http://" + urlData
-			} else {
-				urlData = "https://" + urlData
+		} else {
+			// проверяем протокол
+			if strings.HasPrefix(urlData, "http") == false {
+				resp, err := http.Head("https://" + urlData)
+				if err != nil || resp.StatusCode >= 400 {
+					urlData = "http://" + urlData
+				} else {
+					urlData = "https://" + urlData
+				}
 			}
-		}
 
-		// проверяем, что url отсутствует в представлении ViewBlockedDomain
-		urlHost, _ := url.Parse(urlData)
-		if _, found := blockedUrls[urlHost.Host]; found == true {
-			reportData.UrlBlockedByRkn = 1
-			reportData.Comments = append(reportData.Comments, "Блокировка по закону")
-			results <- reportData
-			return
-		}
-
-		// делаем запрос
-		client := &http.Client{
-			Timeout: 5 * time.Second,
-		}
-		req, err := http.NewRequest("GET", urlData, nil)
-		if err == nil {
-			req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/74.0.3729.169 Safari/537.36")
-		}
-		resp, err := client.Do(req)
-		if err != nil {
-			// обрабатываем ошибки
-			if strings.Contains(err.Error(), "certificate") {
-				reportData.Comments = append(reportData.Comments, "Не удалось распознать сертификат")
-			} else if strings.Contains(err.Error(), "no such host") {
-				reportData.Comments = append(reportData.Comments, "Неразрешенный домен")
-			} else if strings.Contains(err.Error(), "request canceled") ||
-				strings.Contains(err.Error(), "connection was forcibly closed") {
-				reportData.Comments = append(reportData.Comments, "Соединение сброшено или таймаут")
-			} else {
-				fmt.Println("Ошибка воркера ", id, urlData, err)
-				reportData.Comments = append(reportData.Comments, "Требуется уточнение")
-			}
-			results <- reportData
-			return
-		}
-
-		var finalURL = urlData
-		// узнаем статус
-		var statusCode = responseStatusCode(urlData)
-		reportData.UrlAvailable = 1
-		reportData.UrlParsed = 1
-		// находим редиректы
-		if statusCode > 300 && statusCode < 400 {
-			finalURL = resp.Request.URL.String()
-			reportData.UrlRedirected = 1
-			reportData.Comments = append(reportData.Comments, strconv.Itoa(statusCode)+" "+finalURL)
 			// проверяем, что url отсутствует в представлении ViewBlockedDomain
-			urlHost, _ := url.Parse(finalURL)
 			if _, found := blockedUrls[urlHost.Host]; found == true {
 				reportData.UrlBlockedByRkn = 1
 				reportData.Comments = append(reportData.Comments, "Блокировка по закону")
 				results <- reportData
 				return
 			}
-		} else if statusCode >= 400 {
-			reportData.UrlAvailable = 0
-			reportData.UrlParsed = 0
-			reportData.Comments = append(reportData.Comments, "Код ошибки: "+strconv.Itoa(statusCode))
-			results <- reportData
-			return
+
+			// делаем запрос
+			client := &http.Client{
+				Timeout: 5 * time.Second,
+			}
+			req, err := http.NewRequest("GET", urlData, nil)
+			if err == nil {
+				req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/74.0.3729.169 Safari/537.36")
+			}
+			resp, err := client.Do(req)
+			if err != nil {
+				// обрабатываем ошибки
+				if strings.Contains(err.Error(), "certificate") {
+					reportData.Comments = append(reportData.Comments, "Не удалось распознать сертификат")
+				} else if strings.Contains(err.Error(), "no such host") {
+					reportData.Comments = append(reportData.Comments, "Неразрешенный домен")
+				} else if strings.Contains(err.Error(), "request canceled") ||
+					strings.Contains(err.Error(), "connection was forcibly closed") {
+					reportData.Comments = append(reportData.Comments, "Соединение сброшено или таймаут")
+				} else if strings.Contains(err.Error(), "redirects") {
+					reportData.Comments = append(reportData.Comments, "Слишком много редиректов")
+				} else {
+					fmt.Println("Ошибка воркера ", id, urlData, err)
+					reportData.Comments = append(reportData.Comments, "Требуется уточнение")
+				}
+				results <- reportData
+			} else {
+				var finalURL = urlData
+				// узнаем статус
+				var statusCode = responseStatusCode(urlData)
+				reportData.UrlAvailable = 1
+				reportData.UrlParsed = 1
+
+				if statusCode >= 400 {
+					reportData.UrlAvailable = 0
+					reportData.UrlParsed = 0
+					reportData.Comments = append(reportData.Comments, "Код ошибки: "+strconv.Itoa(statusCode))
+					results <- reportData
+				} else {
+					// находим редиректы
+					if statusCode > 300 && statusCode < 400 {
+						finalURL = resp.Request.URL.String()
+						reportData.UrlRedirected = 1
+						reportData.Comments = append(reportData.Comments, strconv.Itoa(statusCode)+" "+finalURL)
+						// проверяем, что url отсутствует в представлении ViewBlockedDomain
+						urlHost, _ := url.Parse(finalURL)
+						if _, found := blockedUrls[urlHost.Host]; found == true {
+							reportData.UrlBlockedByRkn = 1
+							reportData.Comments = append(reportData.Comments, "Блокировка по закону")
+							results <- reportData
+							return
+						}
+					}
+
+					// Анализируем сайт
+					reportData.ChildPages, // определяем список адресов дочерних страниц
+						reportData.ImagesCount, // подсчитываем картинки
+						reportData.WordsCount,  // Подсчитываем слова
+						reportData.StopPhrases,
+						reportData.Descriptions,
+						reportData.Contacts,
+						reportData.RegDocs,
+						reportData.PayButtons,
+						reportData.PayRules,
+						reportData.Offers,
+						reportData.PayLimits = getSiteAnalysis(resp.Body, finalURL, references)
+
+					// закрываем тело ответа
+					resp.Body.Close()
+					// возвращаем результат
+					results <- reportData
+				}
+			}
 		}
-
-		// Анализируем сайт
-		reportData.ChildPages, // определяем список адресов дочерних страниц
-			reportData.ImagesCount, // подсчитываем картинки
-			reportData.WordsCount,  // Подсчитываем слова
-			reportData.StopPhrases,
-			reportData.Descriptions,
-			reportData.Contacts,
-			reportData.RegDocs,
-			reportData.PayButtons,
-			reportData.PayRules,
-			reportData.Offers,
-			reportData.PayLimits = getSiteAnalysis(resp.Body, finalURL, references)
-
-		// закрываем тело ответа
-		resp.Body.Close()
-		// возвращаем результат
-		results <- reportData
 	}
 }
 
@@ -343,6 +424,12 @@ func getSiteAnalysis(body io.Reader, finalURL string, references map[string][]st
 	// получаем количество слов
 	var siteText = document.Find("body").Text()
 	siteText = strings.ToLower(siteText)
+	siteText = strings.ReplaceAll(siteText, ".", "")
+	siteText = strings.ReplaceAll(siteText, ",", "")
+	siteText = strings.ReplaceAll(siteText, "!", "")
+	siteText = strings.ReplaceAll(siteText, "?", "")
+	siteText = strings.ReplaceAll(siteText, ":", "")
+	siteText = strings.ReplaceAll(siteText, ";", "")
 	var textWords = strings.Fields(siteText)
 	wordsCount = len(textWords)
 
