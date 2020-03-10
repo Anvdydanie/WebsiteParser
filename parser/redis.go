@@ -3,15 +3,18 @@ package parser
 import (
 	"encoding/json"
 	"github.com/gomodule/redigo/redis"
+	"os"
 )
 
 const prefix = "robot_checker_"
+
+var redisAddr = os.Getenv("REDIS_ADDR")
 
 /**
 Записываем данные в redis
 */
 func RedisSet(key string, data *report) {
-	conn, err := redis.Dial("tcp", "localhost:6379")
+	conn, err := redis.Dial("tcp", redisAddr)
 	if err != nil {
 		return
 	}
@@ -27,7 +30,7 @@ func RedisSet(key string, data *report) {
 func RedisGet(key string) *report {
 	var result report
 
-	conn, err := redis.Dial("tcp", "localhost:6379")
+	conn, err := redis.Dial("tcp", redisAddr)
 	if err != nil {
 		return &report{}
 	}
@@ -45,7 +48,7 @@ func RedisGet(key string) *report {
 func RedisGetBool(key string) bool {
 	var result = false
 
-	conn, err := redis.Dial("tcp", "localhost:6379")
+	conn, err := redis.Dial("tcp", redisAddr)
 	if err != nil {
 		return false
 	}

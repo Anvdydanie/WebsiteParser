@@ -7,6 +7,7 @@ import (
 	"io/ioutil"
 	"net/http"
 	"net/url"
+	"os"
 	"regexp"
 	"strconv"
 	"strings"
@@ -38,10 +39,11 @@ type report struct {
 	ChildPages      []string
 }
 
-const nodeCheckStatus = "http://localhost:9090/api/check-status/"
-const nodeCheckStatusPages = "http://localhost:9090/api/check-status-pages/"
-const fileWithBlockedDomains = "listOfBlockedDomains.txt"
+var nodePort = os.Getenv("NODE_PORT")
+var nodeCheckStatus = "http://localhost:" + nodePort + "/api/check-status/"
+var nodeCheckStatusPages = "http://localhost:" + nodePort + "/api/check-status-pages/"
 
+const fileWithBlockedDomains = "listOfBlockedDomains.txt"
 const childPagesQuantity = 50
 
 var iteratee = 0
