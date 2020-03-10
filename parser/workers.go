@@ -324,6 +324,7 @@ func workerLogic(id int, references map[string][]string, blockedUrls map[string]
 					reportData.UrlAvailable = 0
 					reportData.UrlParsed = 0
 					reportData.Comments = append(reportData.Comments, "Код ошибки: "+strconv.Itoa(statusCode))
+					resp.Body.Close()
 					results <- reportData
 				} else {
 					// находим редиректы
@@ -336,6 +337,7 @@ func workerLogic(id int, references map[string][]string, blockedUrls map[string]
 						if _, found := blockedUrls[urlHost.Host]; found == true {
 							reportData.UrlBlockedByRkn = 1
 							reportData.Comments = append(reportData.Comments, "Блокировка по закону")
+							resp.Body.Close()
 							results <- reportData
 							return
 						}
@@ -356,6 +358,8 @@ func workerLogic(id int, references map[string][]string, blockedUrls map[string]
 
 					// закрываем тело ответа
 					resp.Body.Close()
+					// очищаем память
+					resp = nil
 					// возвращаем результат
 					results <- reportData
 				}
@@ -378,7 +382,9 @@ func responseStatusCode(urlStr string) int {
 	if err != nil {
 		return http.StatusInternalServerError
 	}
-	return resp.StatusCode
+	result := resp.StatusCode
+	resp.Body.Close()
+	return result
 }
 
 /**
