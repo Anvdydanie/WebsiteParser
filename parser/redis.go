@@ -47,16 +47,13 @@ func RedisGetBool(key string) bool {
 
 	conn, err := redis.Dial("tcp", "localhost:6379")
 	if err != nil {
-		return result
+		return false
 	}
 	defer conn.Close()
 
-	data, err := redis.String(conn.Do("HGET", prefix+key, "data"))
+	result, err = redis.Bool(conn.Do("GET", prefix+key))
 	if err != nil {
 		return result
-	}
-	if data == "true" {
-		result = true
 	}
 
 	return result

@@ -2,7 +2,6 @@ package parser
 
 import (
 	"encoding/json"
-	"fmt"
 	"github.com/PuerkitoBio/goquery"
 	"io"
 	"io/ioutil"
@@ -41,6 +40,7 @@ type report struct {
 
 const nodeCheckStatus = "http://localhost:9090/api/check-status/"
 const nodeCheckStatusPages = "http://localhost:9090/api/check-status-pages/"
+const fileWithBlockedDomains = "listOfBlockedDomains.txt"
 
 const childPagesQuantity = 50
 
@@ -76,8 +76,7 @@ func Parser(
 	for i, mainPageData := range mainPageResult {
 		var needToCache = false
 		// останавливаем воркеры
-		if RedisGetBool("stop") == true {
-			fmt.Println(1111)
+		if RedisGetBool("stop_"+strconv.Itoa(checkId)) == true {
 			break
 		}
 
@@ -87,7 +86,6 @@ func Parser(
 			siteData := RedisGet(mainPageData.Url)
 			// Если в кэше есть данные
 			if len(siteData.Url) > 0 {
-				fmt.Println("cache is gotten")
 				*mainPageData = *siteData
 			} else {
 				needToCache = true
@@ -105,6 +103,10 @@ func Parser(
 			}
 			childPageResult := startWorkers(mainPageData.ChildPages, references, blockedUrlsMap, false, checkId, 50)
 			for _, childPageData := range childPageResult {
+				// останавливаем воркеры
+				if RedisGetBool("stop_"+strconv.Itoa(checkId)) == true {
+					break
+				}
 				// проверяем данные
 				//if childPageData.UrlParsed == 0 {
 				//	mainPageData.UrlParsed = 0
@@ -133,7 +135,6 @@ func Parser(
 			}
 			// записываем результаты в кэш
 			if needToCache {
-				fmt.Println("cache saved")
 				RedisSet(mainPageData.Url, mainPageData)
 			}
 		}
@@ -186,7 +187,12 @@ func Parser(
 			_, _ = http.Get(nodeUrl)
 		}
 
-		fmt.Println("дочерние", iteratee*50/len(urlSlice))
+		//fmt.Println("дочерние", iteratee*50/len(urlSlice))
+	}
+
+	// если проверка была остановлена
+	if RedisGetBool("stop_"+strconv.Itoa(checkId)) == true {
+		return nil
 	}
 
 	return mainPageResult
@@ -221,14 +227,11 @@ func startWorkers(urlsList []string, references map[string][]string, blockedUrls
 				_, _ = http.Get(nodeUrl)
 			}
 
-			// TODO останавливаем воркеры
-			if RedisGetBool("stop") == true {
-				fmt.Println(2222)
-				// TODO удаляем кэш
-				return result
-			}
-
-			fmt.Println("главная", iteratee*50/numJobs)
+			//fmt.Println("главная", iteratee*50/numJobs)
+		}
+		// останавливаем воркеры
+		if RedisGetBool("stop_"+strconv.Itoa(checkId)) == true {
+			break
 		}
 		result = append(result, <-pageAnalyzis)
 	}
@@ -284,12 +287,13 @@ func workerLogic(id int, references map[string][]string, blockedUrls map[string]
 				} else if strings.Contains(err.Error(), "no such host") {
 					reportData.Comments = append(reportData.Comments, "Неразрешенный домен")
 				} else if strings.Contains(err.Error(), "request canceled") ||
-					strings.Contains(err.Error(), "connection was forcibly closed") {
+					strings.Contains(err.Error(), "connection was forcibly closed") ||
+					strings.Contains(err.Error(), "target machine actively refused it") {
 					reportData.Comments = append(reportData.Comments, "Соединение сброшено или таймаут")
 				} else if strings.Contains(err.Error(), "redirects") {
 					reportData.Comments = append(reportData.Comments, "Слишком много редиректов")
 				} else {
-					fmt.Println("Ошибка воркера ", id, urlData, err)
+					//fmt.Println("Ошибка воркера ", id, urlData, err)
 					reportData.Comments = append(reportData.Comments, "Требуется уточнение")
 				}
 				results <- reportData
@@ -485,7 +489,7 @@ func uniquelyzer(strSlice []string) []string {
 */
 func getBlockedUrlsMap() map[string]bool {
 	var result = make(map[string]bool)
-	file, err := ioutil.ReadFile("listOfBlockedDomains.txt")
+	file, err := ioutil.ReadFile(fileWithBlockedDomains)
 	if err != nil {
 		return result
 	}
