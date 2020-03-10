@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"RobotChecker/logger"
 	"RobotChecker/parser"
 	"encoding/json"
 	"io/ioutil"
@@ -22,11 +23,17 @@ func StartCheckHandler(resp http.ResponseWriter, req *http.Request) {
 	body, err := ioutil.ReadAll(req.Body)
 
 	if err != nil {
+		// логируем ошибку
+		logger.Logger("Ошибка при получении запроса от nodejs: " + err.Error())
+		// отправляем ответ
 		http.Error(resp, err.Error(), http.StatusBadRequest)
 		return
 	}
 	err = json.Unmarshal(body, &reqBody)
 	if err != nil {
+		// логируем ошибку
+		logger.Logger("Ошибка при парсинге тела запроса от nodejs: " + err.Error())
+		// отправляем ответ
 		http.Error(resp, err.Error(), http.StatusBadRequest)
 		return
 	}
@@ -36,6 +43,9 @@ func StartCheckHandler(resp http.ResponseWriter, req *http.Request) {
 	// переводим ответ в json
 	result, err := json.Marshal(_result)
 	if err != nil {
+		// логируем ошибку
+		logger.Logger("Ошибка при формировании результатов отчета в json для nodejs: " + err.Error())
+		// отправляем ответ
 		http.Error(resp, err.Error(), http.StatusBadRequest)
 		return
 	}

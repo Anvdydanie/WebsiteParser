@@ -1,6 +1,7 @@
 package parser
 
 import (
+	"RobotChecker/logger"
 	"encoding/json"
 	"github.com/PuerkitoBio/goquery"
 	"io"
@@ -71,6 +72,9 @@ func Parser(
 	// оповещение ноды о проверке страницы
 	var nodeUrlPages = nodeCheckStatusPages + strconv.Itoa(checkId) + "?message=" + url.QueryEscape("Идет проверка главных страниц сайтов")
 	_, _ = http.Get(nodeUrlPages)
+
+	// логируем статус
+	logger.Logger("Начинается проверка " + strconv.Itoa(checkId) + " на список сайтов: " + strconv.Itoa(len(urlSlice)))
 
 	// результат анализа главной страницы
 	mainPageResult = startWorkers(urlSlice, references, blockedUrlsMap, true, checkId, 50)
@@ -187,6 +191,8 @@ func Parser(
 			samePercent = percent
 			var nodeUrl = nodeCheckStatus + strconv.Itoa(checkId) + "?percent=" + strconv.Itoa(percent)
 			_, _ = http.Get(nodeUrl)
+			// логируем проверку
+			logger.Logger("Ход проверки " + strconv.Itoa(checkId) + " составляет " + strconv.Itoa(percent) + "%")
 		}
 
 		//fmt.Println("дочерние", iteratee*50/len(urlSlice))
@@ -194,6 +200,8 @@ func Parser(
 
 	// если проверка была остановлена
 	if RedisGetBool("stop_"+strconv.Itoa(checkId)) == true {
+		// логируем остановку
+		logger.Logger("Проверка " + strconv.Itoa(checkId) + " остановлена пользователем")
 		return nil
 	}
 
@@ -225,8 +233,14 @@ func startWorkers(urlsList []string, references map[string][]string, blockedUrls
 			// оповещаем node о ходе проверки
 			if percent%2 == 0 && percent != samePercent {
 				samePercent = percent
+				// оповещение ноды о проценте выполнения
 				var nodeUrl = nodeCheckStatus + strconv.Itoa(checkId) + "?percent=" + strconv.Itoa(iteratee*50/numJobs)
 				_, _ = http.Get(nodeUrl)
+				// логируем проверку
+				logger.Logger("Ход проверки " + strconv.Itoa(checkId) + " составляет " + strconv.Itoa(percent) + "%")
+				// оповещение ноды о проверке страниц
+				var nodeUrlPages = nodeCheckStatusPages + strconv.Itoa(checkId) + "?message=" + url.QueryEscape("Идет проверка главных страниц сайтов")
+				_, _ = http.Get(nodeUrlPages)
 			}
 
 			//fmt.Println("главная", iteratee*50/numJobs)

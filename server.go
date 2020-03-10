@@ -2,7 +2,7 @@ package main
 
 import (
 	"RobotChecker/handlers"
-	"fmt"
+	"RobotChecker/logger"
 	"net/http"
 	"os"
 )
@@ -20,7 +20,10 @@ func main() {
 
 	http.HandleFunc("/start-check", handlers.StartCheckHandler)
 
+	// создаем файл с логами
+	logger.Logger("Запускаем сервер go...")
+	// запускаем вебсервер
 	if err := server.ListenAndServe(); err != nil {
-		fmt.Println(err.Error())
+		logger.Logger("Ошибка при запуске вебсервера: " + err.Error())
 	}
 }
