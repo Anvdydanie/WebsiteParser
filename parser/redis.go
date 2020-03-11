@@ -1,6 +1,7 @@
 package parser
 
 import (
+	"RobotChecker/logger"
 	"encoding/json"
 	"github.com/gomodule/redigo/redis"
 	"os"
@@ -16,12 +17,16 @@ var redisAddr = os.Getenv("REDIS_ADDR")
 func RedisSet(key string, data *report) {
 	conn, err := redis.Dial("tcp", redisAddr)
 	if err != nil {
+		logger.Logger("Ошибка redis в методе dial: " + err.Error())
 		return
 	}
 	defer conn.Close()
 	jsonData, _ := json.Marshal(data)
 
 	_, err = conn.Do("HMSET", prefix+key, "data", jsonData)
+	if err != nil {
+		logger.Logger("Ошибка redis в методе hmset: " + err.Error())
+	}
 }
 
 /**
@@ -32,6 +37,7 @@ func RedisGet(key string) *report {
 
 	conn, err := redis.Dial("tcp", redisAddr)
 	if err != nil {
+		logger.Logger("Ошибка redis в методе dial: " + err.Error())
 		return &report{}
 	}
 	defer conn.Close()
@@ -39,6 +45,7 @@ func RedisGet(key string) *report {
 	data, err := redis.Bytes(conn.Do("HGET", prefix+key, "data"))
 	_ = json.Unmarshal(data, &result)
 	if err != nil {
+		logger.Logger("Ошибка redis в методе hget: " + err.Error())
 		return &report{}
 	}
 
@@ -50,12 +57,14 @@ func RedisGetBool(key string) bool {
 
 	conn, err := redis.Dial("tcp", redisAddr)
 	if err != nil {
+		logger.Logger("Ошибка redis в методе dial: " + err.Error())
 		return false
 	}
 	defer conn.Close()
 
 	result, err = redis.Bool(conn.Do("GET", prefix+key))
 	if err != nil {
+		logger.Logger("Ошибка redis в методе getBool: " + err.Error())
 		return result
 	}
 
