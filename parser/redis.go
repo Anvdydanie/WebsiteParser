@@ -11,18 +11,30 @@ const prefix = "robot_checker_"
 
 var redisAddr = os.Getenv("REDIS_ADDR")
 
+var connection *redis.Conn
+
+/**
+Создаем соединение redis
+*/
+func init() {
+	conn, err := redis.Dial("tcp", redisAddr)
+	if err != nil {
+		logger.Logger("Ошибка при соединении с redis: " + err.Error())
+		panic("Не удалось установить соединение с redis")
+	}
+	connection = &conn
+}
+
 /**
 Записываем данные в redis
 */
 func RedisSet(key string, data *report) {
-	conn, err := redis.Dial("tcp", redisAddr)
+	jsonData, err := json.Marshal(data)
 	if err != nil {
-		logger.Logger("Ошибка redis в методе dial: " + err.Error())
-		return
+		logger.Logger("Ошибка redis в методе RedisSet: " + err.Error())
 	}
-	defer conn.Close()
-	jsonData, _ := json.Marshal(data)
 
+	conn := *connection
 	_, err = conn.Do("HMSET", prefix+key, "data", jsonData)
 	if err != nil {
 		logger.Logger("Ошибка redis в методе hmset: " + err.Error())
@@ -34,18 +46,15 @@ func RedisSet(key string, data *report) {
 */
 func RedisGet(key string) *report {
 	var result report
-
-	conn, err := redis.Dial("tcp", redisAddr)
-	if err != nil {
-		logger.Logger("Ошибка redis в методе dial: " + err.Error())
-		return &report{}
-	}
-	defer conn.Close()
-
+	conn := *connection
 	data, err := redis.Bytes(conn.Do("HGET", prefix+key, "data"))
-	_ = json.Unmarshal(data, &result)
 	if err != nil {
 		logger.Logger("Ошибка redis в методе hget: " + err.Error())
+		return &report{}
+	}
+	err = json.Unmarshal(data, &result)
+	if err != nil {
+		logger.Logger("Не удалось преобразовать данные из json: " + err.Error())
 		return &report{}
 	}
 
@@ -53,19 +62,10 @@ func RedisGet(key string) *report {
 }
 
 func RedisGetBool(key string) bool {
-	var result = false
-
-	conn, err := redis.Dial("tcp", redisAddr)
-	if err != nil {
-		logger.Logger("Ошибка redis в методе dial: " + err.Error())
-		return false
-	}
-	defer conn.Close()
-
-	result, err = redis.Bool(conn.Do("GET", prefix+key))
-	if err != nil {
+	conn := *connection
+	result, err := redis.Bool(conn.Do("GET", prefix+key))
+	if err != nil && err.Error() != "nil returned" {
 		logger.Logger("Ошибка redis в методе getBool: " + err.Error())
-		return result
 	}
 
 	return result

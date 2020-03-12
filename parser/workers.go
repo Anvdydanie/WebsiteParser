@@ -358,8 +358,6 @@ func workerLogic(id int, references map[string][]string, blockedUrls map[string]
 
 					// закрываем тело ответа
 					resp.Body.Close()
-					// очищаем память
-					resp = nil
 					// возвращаем результат
 					results <- reportData
 				}
