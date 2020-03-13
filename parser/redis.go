@@ -1,15 +1,13 @@
 package parser
 
 import (
+	"RobotChecker/configs"
 	"RobotChecker/logger"
 	"encoding/json"
 	"github.com/gomodule/redigo/redis"
-	"os"
 )
 
 const prefix = "robot_checker_"
-
-var redisAddr = os.Getenv("REDIS_ADDR")
 
 var connection *redis.Conn
 
@@ -17,10 +15,10 @@ var connection *redis.Conn
 Создаем соединение redis
 */
 func init() {
-	conn, err := redis.Dial("tcp", redisAddr)
+	conn, err := redis.Dial("tcp", configs.RedisAddr())
 	if err != nil {
 		logger.Logger("Ошибка при соединении с redis: " + err.Error())
-		panic("Не удалось установить соединение с redis")
+		panic("Не удалось установить соединение с redis. " + err.Error())
 	}
 	connection = &conn
 }
@@ -63,10 +61,7 @@ func RedisGet(key string) *report {
 
 func RedisGetBool(key string) bool {
 	conn := *connection
-	result, err := redis.Bool(conn.Do("GET", prefix+key))
-	if err != nil && err.Error() != "nil returned" {
-		logger.Logger("Ошибка redis в методе getBool: " + err.Error())
-	}
+	result, _ := redis.Bool(conn.Do("GET", prefix+key))
 
 	return result
 }

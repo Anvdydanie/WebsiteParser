@@ -1,6 +1,7 @@
 package parser
 
 import (
+	"RobotChecker/configs"
 	"RobotChecker/logger"
 	"encoding/json"
 	"github.com/PuerkitoBio/goquery"
@@ -8,7 +9,6 @@ import (
 	"io/ioutil"
 	"net/http"
 	"net/url"
-	"os"
 	"regexp"
 	"strconv"
 	"strings"
@@ -40,9 +40,8 @@ type report struct {
 	ChildPages      []string
 }
 
-var nodePort = os.Getenv("NODE_PORT")
-var nodeCheckStatus = "http://localhost:" + nodePort + "/api/check-status/"
-var nodeCheckStatusPages = "http://localhost:" + nodePort + "/api/check-status-pages/"
+var nodeCheckStatus = configs.NodeAddr() + "/api/check-status/"
+var nodeCheckStatusPages = configs.NodeAddr() + "/api/check-status-pages/"
 
 const fileWithBlockedDomains = "listOfBlockedDomains.txt"
 const childPagesQuantity = 50
@@ -251,7 +250,6 @@ func startWorkers(urlsList []string, references map[string][]string, blockedUrls
 		}
 		result = append(result, <-pageAnalyzis)
 	}
-
 	return result
 }
 
@@ -284,7 +282,6 @@ func workerLogic(id int, references map[string][]string, blockedUrls map[string]
 				reportData.UrlBlockedByRkn = 1
 				reportData.Comments = append(reportData.Comments, "Блокировка по закону")
 				results <- reportData
-				return
 			}
 
 			// делаем запрос
@@ -292,74 +289,76 @@ func workerLogic(id int, references map[string][]string, blockedUrls map[string]
 				Timeout: 5 * time.Second,
 			}
 			req, err := http.NewRequest("GET", urlData, nil)
-			if err == nil {
-				req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/74.0.3729.169 Safari/537.36")
-			}
-			resp, err := client.Do(req)
 			if err != nil {
-				// обрабатываем ошибки
-				if strings.Contains(err.Error(), "certificate") {
-					reportData.Comments = append(reportData.Comments, "Не удалось распознать сертификат")
-				} else if strings.Contains(err.Error(), "no such host") {
-					reportData.Comments = append(reportData.Comments, "Неразрешенный домен")
-				} else if strings.Contains(err.Error(), "request canceled") ||
-					strings.Contains(err.Error(), "connection was forcibly closed") ||
-					strings.Contains(err.Error(), "target machine actively refused it") {
-					reportData.Comments = append(reportData.Comments, "Соединение сброшено или таймаут")
-				} else if strings.Contains(err.Error(), "redirects") {
-					reportData.Comments = append(reportData.Comments, "Слишком много редиректов")
-				} else {
-					//fmt.Println("Ошибка воркера ", id, urlData, err)
-					reportData.Comments = append(reportData.Comments, "Требуется уточнение")
-				}
 				results <- reportData
 			} else {
-				var finalURL = urlData
-				// узнаем статус
-				var statusCode = responseStatusCode(urlData)
-				reportData.UrlAvailable = 1
-				reportData.UrlParsed = 1
+				req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/74.0.3729.169 Safari/537.36")
 
-				if statusCode >= 400 {
-					reportData.UrlAvailable = 0
-					reportData.UrlParsed = 0
-					reportData.Comments = append(reportData.Comments, "Код ошибки: "+strconv.Itoa(statusCode))
-					resp.Body.Close()
+				resp, err := client.Do(req)
+				if err != nil {
+					// обрабатываем ошибки
+					if strings.Contains(err.Error(), "certificate") {
+						reportData.Comments = append(reportData.Comments, "Не удалось распознать сертификат")
+					} else if strings.Contains(err.Error(), "no such host") {
+						reportData.Comments = append(reportData.Comments, "Неразрешенный домен")
+					} else if strings.Contains(err.Error(), "request canceled") ||
+						strings.Contains(err.Error(), "connection was forcibly closed") ||
+						strings.Contains(err.Error(), "target machine actively refused it") {
+						reportData.Comments = append(reportData.Comments, "Соединение сброшено или таймаут")
+					} else if strings.Contains(err.Error(), "redirects") {
+						reportData.Comments = append(reportData.Comments, "Слишком много редиректов")
+					} else {
+						//fmt.Println("Ошибка воркера ", id, urlData, err)
+						reportData.Comments = append(reportData.Comments, "Требуется уточнение")
+					}
 					results <- reportData
 				} else {
-					// находим редиректы
-					if statusCode > 300 && statusCode < 400 {
-						finalURL = resp.Request.URL.String()
-						reportData.UrlRedirected = 1
-						reportData.Comments = append(reportData.Comments, strconv.Itoa(statusCode)+" "+finalURL)
-						// проверяем, что url отсутствует в представлении ViewBlockedDomain
-						urlHost, _ := url.Parse(finalURL)
-						if _, found := blockedUrls[urlHost.Host]; found == true {
-							reportData.UrlBlockedByRkn = 1
-							reportData.Comments = append(reportData.Comments, "Блокировка по закону")
-							resp.Body.Close()
-							results <- reportData
-							return
+					var finalURL = urlData
+					// узнаем статус
+					var statusCode = responseStatusCode(urlData)
+					reportData.UrlAvailable = 1
+					reportData.UrlParsed = 1
+
+					if statusCode >= 400 {
+						reportData.UrlAvailable = 0
+						reportData.UrlParsed = 0
+						reportData.Comments = append(reportData.Comments, "Код ошибки: "+strconv.Itoa(statusCode))
+						resp.Body.Close()
+						results <- reportData
+					} else {
+						// находим редиректы
+						if statusCode > 300 && statusCode < 400 {
+							finalURL = resp.Request.URL.String()
+							reportData.UrlRedirected = 1
+							reportData.Comments = append(reportData.Comments, strconv.Itoa(statusCode)+" "+finalURL)
+							// проверяем, что url отсутствует в представлении ViewBlockedDomain
+							urlHost, _ := url.Parse(finalURL)
+							if _, found := blockedUrls[urlHost.Host]; found == true {
+								reportData.UrlBlockedByRkn = 1
+								reportData.Comments = append(reportData.Comments, "Блокировка по закону")
+								resp.Body.Close()
+								results <- reportData
+							}
 						}
+
+						// Анализируем сайт
+						reportData.ChildPages, // определяем список адресов дочерних страниц
+							reportData.ImagesCount, // подсчитываем картинки
+							reportData.WordsCount,  // Подсчитываем слова
+							reportData.StopPhrases,
+							reportData.Descriptions,
+							reportData.Contacts,
+							reportData.RegDocs,
+							reportData.PayButtons,
+							reportData.PayRules,
+							reportData.Offers,
+							reportData.PayLimits = getSiteAnalysis(resp.Body, finalURL, references)
+
+						// закрываем тело ответа
+						resp.Body.Close()
+						// возвращаем результат
+						results <- reportData
 					}
-
-					// Анализируем сайт
-					reportData.ChildPages, // определяем список адресов дочерних страниц
-						reportData.ImagesCount, // подсчитываем картинки
-						reportData.WordsCount,  // Подсчитываем слова
-						reportData.StopPhrases,
-						reportData.Descriptions,
-						reportData.Contacts,
-						reportData.RegDocs,
-						reportData.PayButtons,
-						reportData.PayRules,
-						reportData.Offers,
-						reportData.PayLimits = getSiteAnalysis(resp.Body, finalURL, references)
-
-					// закрываем тело ответа
-					resp.Body.Close()
-					// возвращаем результат
-					results <- reportData
 				}
 			}
 		}
