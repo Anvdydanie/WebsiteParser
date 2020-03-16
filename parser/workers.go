@@ -15,7 +15,7 @@ import (
 	"time"
 )
 
-type report struct {
+type Report struct {
 	Id              int
 	CheckId         int
 	ServiceId       int
@@ -54,9 +54,9 @@ func Parser(
 	checkId int,
 	references map[string][]string,
 	minWords int, minImgs int,
-	duplicUrls map[string]string,
+	duplicUrls map[string]Report,
 	serviceTurnover map[string]float32,
-) (mainPageResult []*report) {
+) (mainPageResult []*Report) {
 	iteratee = 0
 	samePercent = 0
 	// получаем набор урлов на проверку
@@ -86,12 +86,12 @@ func Parser(
 		}
 
 		// проверяем является ли сайт дубликатом
-		_, exists := duplicUrls[mainPageData.Url]
+		siteData, exists := duplicUrls[mainPageData.Url]
 		if exists {
-			siteData := RedisGet(mainPageData.Url)
+			//siteData := RedisGet(mainPageData.Url)
 			// Если в кэше есть данные
 			if len(siteData.Url) > 0 {
-				*mainPageData = *siteData
+				*mainPageData = siteData
 			} else {
 				needToCache = true
 			}
@@ -140,7 +140,8 @@ func Parser(
 			}
 			// записываем результаты в кэш
 			if needToCache {
-				RedisSet(mainPageData.Url, mainPageData)
+				duplicUrls[mainPageData.Url] = *mainPageData
+				//RedisSet(mainPageData.Url, mainPageData)
 			}
 		}
 
@@ -207,17 +208,17 @@ func Parser(
 	return mainPageResult
 }
 
-func startWorkers(urlsList []string, references map[string][]string, blockedUrls map[string]bool, mainPage bool, checkId int, maxWorkers int) (result []*report) {
+func startWorkers(urlsList []string, references map[string][]string, blockedUrls map[string]bool, mainPage bool, checkId int, maxWorkers int) (result []*Report) {
 	var numJobs = len(urlsList)
 	jobs := make(chan string, numJobs)
-	pageAnalyzis := make(chan *report, numJobs)
+	pageAnalyzis := make(chan *Report, numJobs)
 
 	var workersQuantity = numJobs
 	if workersQuantity > maxWorkers {
 		workersQuantity = maxWorkers
 	}
 	for w := 0; w < workersQuantity; w++ {
-		go workerLogic(w+1, references, blockedUrls, jobs, pageAnalyzis)
+		go workerLogic(checkId, references, blockedUrls, jobs, pageAnalyzis)
 	}
 
 	for i := 0; i < len(urlsList); i++ {
@@ -253,11 +254,11 @@ func startWorkers(urlsList []string, references map[string][]string, blockedUrls
 	return result
 }
 
-func workerLogic(id int, references map[string][]string, blockedUrls map[string]bool, jobs <-chan string, results chan<- *report) {
+func workerLogic(checkId int, references map[string][]string, blockedUrls map[string]bool, jobs <-chan string, results chan<- *Report) {
 	var index = 0
 	for urlData := range jobs {
 		// бланк ответа
-		var reportData = new(report)
+		var reportData = new(Report)
 		reportData.Id = index + 1
 		reportData.Url = urlData
 		// проводим валидацию урла
@@ -289,7 +290,7 @@ func workerLogic(id int, references map[string][]string, blockedUrls map[string]
 				Timeout: 5 * time.Second,
 			}
 			req, err := http.NewRequest("GET", urlData, nil)
-			if err != nil {
+			if err != nil || RedisGetBool("stop_"+strconv.Itoa(checkId)) == true {
 				results <- reportData
 			} else {
 				req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/74.0.3729.169 Safari/537.36")

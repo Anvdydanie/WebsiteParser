@@ -8,7 +8,7 @@ import (
 func init() {
 	err := godotenv.Load("./../.env")
 	if err != nil {
-		panic("Ошибка при загрузке env файла. " + err.Error())
+		//panic("Не найден env файл. " + err.Error())
 	}
 }
 
@@ -45,6 +45,6 @@ func LogsPath() string {
 	if exists {
 		return result
 	} else {
-		return "./go-parser/"
+		return "./logger/"
 	}
 }

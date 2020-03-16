@@ -26,7 +26,7 @@ func init() {
 /**
 Записываем данные в redis
 */
-func RedisSet(key string, data *report) {
+func RedisSet(key string, data *Report) {
 	jsonData, err := json.Marshal(data)
 	if err != nil {
 		logger.Logger("Ошибка redis в методе RedisSet: " + err.Error())
@@ -42,18 +42,18 @@ func RedisSet(key string, data *report) {
 /**
 Получаем данные из redis
 */
-func RedisGet(key string) *report {
-	var result report
+func RedisGet(key string) *Report {
+	var result Report
 	conn := *connection
 	data, err := redis.Bytes(conn.Do("HGET", prefix+key, "data"))
 	if err != nil {
 		logger.Logger("Ошибка redis в методе hget: " + err.Error())
-		return &report{}
+		return &Report{}
 	}
 	err = json.Unmarshal(data, &result)
 	if err != nil {
 		logger.Logger("Не удалось преобразовать данные из json: " + err.Error())
-		return &report{}
+		return &Report{}
 	}
 
 	return &result

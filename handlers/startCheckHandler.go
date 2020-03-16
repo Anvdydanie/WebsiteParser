@@ -9,13 +9,13 @@ import (
 )
 
 type ReqBody struct {
-	Urls            []map[string]string `json:"urls"`
-	CheckId         int                 `json:"checkId"`
-	References      map[string][]string `json:"references"`
-	MinWords        int                 `json:"minWords"`
-	MinImgs         int                 `json:"minImgs"`
-	ServiceTurnover map[string]float32  `json:"serviceTurnover"`
-	DuplicUrls      map[string]string   `json:"duplicateUrls"`
+	Urls            []map[string]string      `json:"urls"`
+	CheckId         int                      `json:"checkId"`
+	References      map[string][]string      `json:"references"`
+	MinWords        int                      `json:"minWords"`
+	MinImgs         int                      `json:"minImgs"`
+	ServiceTurnover map[string]float32       `json:"serviceTurnover"`
+	DuplicUrls      map[string]parser.Report `json:"duplicateUrls"`
 }
 
 func StartCheckHandler(resp http.ResponseWriter, req *http.Request) {
